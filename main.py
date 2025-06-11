@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import time
-from datetime import datetime
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +28,7 @@ client = Client(api_key, api_key_secret, account_sid)
 
 app = Flask(__name__)
 
-# Store active calls and their timestamps
-active_calls = {}
-
-# Agent configuration
+# List of agents
 AGENTS = {
     'Hailey': os.getenv('AGENT1_NUMBER', '+18108191394'),
     'Brandi': os.getenv('AGENT2_NUMBER', '+13137658399'),
@@ -43,8 +40,8 @@ AGENTS = {
     'Stephanie': os.getenv('AGENT8_NUMBER', '+15177451309')  # Backup agent
 }
 
-# Store current position in agent sequence
-current_agent_index = 0
+# Track active calls
+active_calls = {}
 
 @app.route('/')
 def home():
@@ -52,7 +49,6 @@ def home():
 
 @app.route('/token', methods=['GET'])
 def get_token():
-    # Use a unique identity for each user
     identity = request.args.get('client', 'user')
     
     if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
@@ -60,10 +56,7 @@ def get_token():
 
     try:
         access_token = AccessToken(account_sid, api_key, api_key_secret, identity=identity)
-        voice_grant = VoiceGrant(
-            outgoing_application_sid=twiml_app_sid,
-            incoming_allow=True
-        )
+        voice_grant = VoiceGrant(outgoing_application_sid=twiml_app_sid, incoming_allow=True)
         access_token.add_grant(voice_grant)
         
         logger.info(f'Generated token for identity: {identity}')
@@ -76,47 +69,24 @@ def get_token():
 @app.route('/handle_calls', methods=['POST'])
 def handle_calls():
     try:
-        # Log incoming request data
         logger.info(f'Incoming call request: {request.form}')
-        
-        # Create TwiML response
         response = VoiceResponse()
         
-        # Ensure Twilio credentials exist
         if not twilio_number:
             return jsonify({'error': 'Twilio number not configured'}), 500
 
-        # Handle incoming/outgoing calls
-        if 'To' in request.form and request.form['To'] != twilio_number:
-            # Outbound call
-            logger.info('Outbound call initiated')
-            dial = Dial(callerId=twilio_number)
-            dial.number(request.form['To'])
-        else:
-            # Incoming call
-            logger.info('Incoming call detected')
-            caller = request.form.get('From', 'Unknown')
-            
-            # Sequential ring group logic
-            current_agent = AGENTS['Hailey']  # Start with Agent 1
-            
-            # Check if we're in the middle of a sequential transfer
-            if 'CurrentAgentIndex' in request.form:
-                current_agent_index = int(request.form['CurrentAgentIndex'])
-                if current_agent_index < 7:  # Don't go past Agent 7
-                    current_agent = AGENTS[f'agent{current_agent_index + 1}']
-            
-            dial = Dial(callerId=twilio_number)
-            dial.number(current_agent)
-            
-            # Add current position for next transfer
-            response.append(dial)
-            response.append(f'<Parameter name="CurrentAgentIndex" value="{current_agent_index}"/>')
+        call_sid = request.form.get('CallSid')
+        from_number = request.form.get('From')
 
-        # Store call timestamp for auto-transfer
-        if 'CallSid' in request.form:
-            active_calls[request.form['CallSid']] = time.time()
+        if call_sid:
+            active_calls[call_sid] = time.time()
 
+        # Assign the first agent
+        agent_numbers = list(AGENTS.values())
+        dial = Dial(callerId=twilio_number)
+        dial.number(agent_numbers[0])  # Starts with the first agent
+        
+        response.append(dial)
         logger.info('Call routing completed')
         return str(response)
 
@@ -130,22 +100,17 @@ def handle_calls():
 def transfer_call():
     try:
         call_sid = request.form.get('CallSid')
-        target_agent = request.form.get('TargetAgent')
-        
-        if not call_sid or not target_agent:
+        target_number = request.form.get('TargetNumber')
+
+        if not call_sid or not target_number:
             return jsonify({'error': 'Missing required parameters'}), 400
 
-        # Validate target agent
-        if target_agent not in AGENTS:
-            return jsonify({'error': 'Invalid target agent'}), 400
-
-        # Update call with transfer
         call = client.calls(call_sid).update(
             method='POST',
-            url=f'https://twilio-web-dialer.onrender.com/handle_calls?TargetAgent={AGENTS[target_agent]}'
+            url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={target_number}'
         )
-        
-        logger.info(f'Transferred call {call_sid} to {target_agent}')
+
+        logger.info(f'Transferred call {call_sid} to {target_number}')
         return jsonify({'success': True, 'message': 'Call transferred successfully'})
 
     except Exception as e:
@@ -157,16 +122,15 @@ def mute_call():
     try:
         call_sid = request.form.get('CallSid')
         mute = request.form.get('Mute', 'True').lower() == 'true'
-        
+
         if not call_sid:
             return jsonify({'error': 'Missing CallSid parameter'}), 400
 
-        # Update call with mute status
-        call = client.calls(call_sid).update(
+        client.calls(call_sid).update(
             method='POST',
             url=f'https://twilio-web-dialer.onrender.com/handle_calls?Mute={str(mute)}'
         )
-        
+
         logger.info(f'{"Muted" if mute else "Unmuted"} call {call_sid}')
         return jsonify({'success': True, 'message': f'Call {call_sid} {"muted" if mute else "unmuted"}'})
 
@@ -175,41 +139,35 @@ def mute_call():
         return jsonify({'error': str(e)}), 500
 
 def check_for_auto_transfer():
-    """Background task to check for calls that need auto-transfer"""
+    """Background task to check for unanswered calls and transfer them."""
     while True:
         current_time = time.time()
         calls_to_transfer = []
-        
+
         for call_sid, start_time in active_calls.items():
-            if current_time - start_time >= 23:  # 23 seconds
+            if current_time - start_time >= 23:
                 calls_to_transfer.append(call_sid)
-        
+
         for call_sid in calls_to_transfer:
             try:
-                # Get the call
                 call = client.calls(call_sid).fetch()
-                
-                # If call is still ringing or in progress
                 if call.status in ['ringing', 'in-progress']:
-                    # Transfer to backup agent (Agent 8)
                     client.calls(call_sid).update(
                         method='POST',
-                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?TargetAgent={AGENTS["Stephanie"]}'
+                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'  # Transfers to backup agent
                     )
                     logger.info(f'Auto-transferred call {call_sid} to backup agent')
-                
-                # Remove from active calls
+
                 del active_calls[call_sid]
-                
+
             except Exception as e:
                 logger.error(f'Auto-transfer failed for call {call_sid}: {str(e)}')
-        
-        time.sleep(1)  # Check every second
 
-# Start auto-transfer checker in background
-import threading
-auto_transfer_thread = threading.Thread(target=check_for_auto_transfer, daemon=True)
-auto_transfer_thread.start()
+        time.sleep(1)
+
+# Start auto-transfer monitoring in background
+transfer_thread = threading.Thread(target=check_for_auto_transfer, daemon=True)
+transfer_thread.start()
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=3000, debug=True)
