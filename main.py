@@ -28,7 +28,7 @@ client = Client(api_key, api_key_secret, account_sid)
 
 app = Flask(__name__)
 
-# List of agents
+# **Preserving your original AGENTS dictionary**
 AGENTS = {
     'Hailey': os.getenv('AGENT1_NUMBER', '+18108191394'),
     'Brandi': os.getenv('AGENT2_NUMBER', '+13137658399'),
@@ -40,7 +40,7 @@ AGENTS = {
     'Stephanie': os.getenv('AGENT8_NUMBER', '+15177451309')  # Backup agent
 }
 
-# Track active calls
+# Track active calls for auto-transfer
 active_calls = {}
 
 @app.route('/')
@@ -50,7 +50,7 @@ def home():
 @app.route('/token', methods=['GET'])
 def get_token():
     identity = request.args.get('client', 'user')
-    
+
     if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
         return jsonify({'error': 'Missing required environment variables'}), 500
 
@@ -58,7 +58,7 @@ def get_token():
         access_token = AccessToken(account_sid, api_key, api_key_secret, identity=identity)
         voice_grant = VoiceGrant(outgoing_application_sid=twiml_app_sid, incoming_allow=True)
         access_token.add_grant(voice_grant)
-        
+
         logger.info(f'Generated token for identity: {identity}')
         return jsonify({'token': access_token.to_jwt(), 'identity': identity})
 
@@ -71,21 +71,26 @@ def handle_calls():
     try:
         logger.info(f'Incoming call request: {request.form}')
         response = VoiceResponse()
-        
+
         if not twilio_number:
             return jsonify({'error': 'Twilio number not configured'}), 500
 
         call_sid = request.form.get('CallSid')
-        from_number = request.form.get('From')
+        to_number = request.form.get('To')
 
-        if call_sid:
-            active_calls[call_sid] = time.time()
+        # **Ensuring outbound calls correctly route to real agents**
+        if to_number and to_number != twilio_number:
+            dial = Dial(callerId=twilio_number)
+            dial.number(to_number)
+        else:
+            # Assign the first available agent for inbound calls
+            agent_numbers = list(AGENTS.values())
+            dial = Dial(callerId=twilio_number)
+            dial.number(agent_numbers[0])  # Start with the first agent
 
-        # Assign the first agent
-        agent_numbers = list(AGENTS.values())
-        dial = Dial(callerId=twilio_number)
-        dial.number(agent_numbers[0])  # Starts with the first agent
-        
+            if call_sid:
+                active_calls[call_sid] = time.time()
+
         response.append(dial)
         logger.info('Call routing completed')
         return str(response)
@@ -100,7 +105,7 @@ def handle_calls():
 def transfer_call():
     try:
         call_sid = request.form.get('CallSid')
-        target_number = request.form.get('TargetNumber')
+        target_number = request.form.get('TargetAgent')
 
         if not call_sid or not target_number:
             return jsonify({'error': 'Missing required parameters'}), 400
