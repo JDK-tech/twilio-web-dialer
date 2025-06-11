@@ -142,7 +142,7 @@ def transfer_call():
         # Update call with transfer
         call = client.calls(call_sid).update(
             method='POST',
-            url=f'http://your-domain.com/handle_calls?TargetAgent={AGENTS[target_agent]}'
+            url=f'https://twilio-web-dialer.onrender.com/handle_calls?TargetAgent={AGENTS[target_agent]}'
         )
         
         logger.info(f'Transferred call {call_sid} to {target_agent}')
@@ -164,7 +164,7 @@ def mute_call():
         # Update call with mute status
         call = client.calls(call_sid).update(
             method='POST',
-            url=f'http://your-domain.com/handle_calls?Mute={str(mute)}'
+            url=f'https://twilio-web-dialer.onrender.com/handle_calls?Mute={str(mute)}'
         )
         
         logger.info(f'{"Muted" if mute else "Unmuted"} call {call_sid}')
@@ -194,7 +194,7 @@ def check_for_auto_transfer():
                     # Transfer to backup agent (Agent 8)
                     client.calls(call_sid).update(
                         method='POST',
-                        url=f'http://your-domain.com/handle_calls?TargetAgent={AGENTS["Stephanie"]}'
+                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?TargetAgent={AGENTS["Stephanie"]}'
                     )
                     logger.info(f'Auto-transferred call {call_sid} to backup agent')
                 
