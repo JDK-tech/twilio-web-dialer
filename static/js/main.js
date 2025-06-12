@@ -88,6 +88,8 @@ $(function () {
 
     function handleError(error) {
         console.error("Twilio Device Error:", error);
+        log("Twilio Error: " + error.message);
+
         if (error.message.includes("WSTransport socket error")) {
             log("WebSocket error detected. Retrying in 5 seconds...");
             setTimeout(fetchTwilioToken, 5000);
@@ -136,6 +138,26 @@ $(function () {
             currentConnection = conn;  // Store active connection
         });
     }
+
+    // **Fixed Call Button Logic**
+    $('#btnDial').on('click', function () {
+        const phoneNumber = $("#phoneNumber").val();  // Get the entered number
+        if (!phoneNumber) {
+            log("No phone number entered.");
+            return;
+        }
+
+        log("Dialing " + phoneNumber + "...");
+
+        if (device) {
+            const conn = device.connect({ To: phoneNumber });
+            conn.on("error", function (error) {
+                log("Call failed: " + error.message);
+            });
+        } else {
+            log("Twilio Device not ready.");
+        }
+    });
 
     async function init() {
         try {
