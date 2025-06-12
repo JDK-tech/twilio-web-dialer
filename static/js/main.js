@@ -109,13 +109,24 @@ $(function () {
 
         $('#btnMute').off().on('click', function () {
             if (currentConnection) {
-                const isMuted = currentConnection.isMuted();
+                const isMuted = $(this).data('muted') === true;
                 currentConnection.mute(!isMuted);
                 log(isMuted ? "Unmuting call..." : "Muting call...");
                 $(this).data('muted', !isMuted);
                 $(this).text(isMuted ? "Mute" : "Unmute");
             } else {
                 log("No active call to mute.");
+            }
+        });
+
+        $('#btnHangUp').on('click', function () {
+            if (currentConnection) {
+                log("Ending call...");
+                currentConnection.disconnect();  // Ensure active connection ends
+                currentConnection = null;  // Reset connection tracking
+                $('.modal').modal('hide');  // Hide active call UI
+            } else {
+                log("No active call to end.");
             }
         });
     }
@@ -139,7 +150,6 @@ $(function () {
         });
     }
 
-    // **Fixed Call Button Logic**
     $('#btnDial').on('click', function () {
         const phoneNumber = $("#phoneNumber").val();  // Get the entered number
         if (!phoneNumber) {
