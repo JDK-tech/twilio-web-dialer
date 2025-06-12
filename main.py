@@ -45,7 +45,7 @@ active_calls = {}
 
 @app.route('/')
 def home():
-    return "Twilio Web Dialer is Running!"
+    return render_template('home.html', title="Twilio Web Dialer")
 
 @app.route('/handle_calls', methods=['POST'])
 def handle_calls():
