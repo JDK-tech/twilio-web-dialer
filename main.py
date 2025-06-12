@@ -47,6 +47,27 @@ active_calls = {}
 def home():
     return render_template('home.html', title="Twilio Web Dialer")
 
+@app.route('/token', methods=['GET'])
+def get_token():
+    identity = request.args.get('client', 'user')
+
+    if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
+        logger.error("Missing required environment variables")
+        return jsonify({'error': 'Missing required environment variables'}), 500
+
+    try:
+        access_token = AccessToken(account_sid, api_key, api_key_secret, identity=identity)
+        voice_grant = VoiceGrant(outgoing_application_sid=twiml_app_sid, incoming_allow=True)
+        access_token.add_grant(voice_grant)
+
+        token = access_token.to_jwt()
+        logger.info(f'Generated token for identity: {identity}')
+        return jsonify({'token': token, 'identity': identity})
+
+    except Exception as e:
+        logger.error(f'Token generation failed: {str(e)}')
+        return jsonify({'error': f'Failed to generate token: {str(e)}'}), 500
+
 @app.route('/handle_calls', methods=['POST'])
 def handle_calls():
     try:
