@@ -43,6 +43,10 @@ AGENTS = {
 # Track active calls for auto-transfer
 active_calls = {}
 
+@app.route('/')
+def home():
+    return "Twilio Web Dialer is Running!"
+
 @app.route('/handle_calls', methods=['POST'])
 def handle_calls():
     try:
@@ -58,11 +62,9 @@ def handle_calls():
 
         # **Outbound vs. Inbound Call Handling**
         if to_number and to_number != twilio_number:
-            # Outbound call
             dial = Dial(callerId=twilio_number)
             dial.number(to_number)
         else:
-            # Inbound call: assign first available agent
             agent_numbers = list(AGENTS.values())
             dial = Dial(callerId=twilio_number)
             dial.number(agent_numbers[0])  # First agent answers
@@ -89,7 +91,6 @@ def transfer_call():
         if not call_sid or not target_number:
             return jsonify({'error': 'Missing required parameters'}), 400
 
-        # Transfer call to provided agent
         client.calls(call_sid).update(
             method='POST',
             url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={target_number}'
@@ -111,7 +112,6 @@ def mute_call():
         if not call_sid:
             return jsonify({'error': 'Missing CallSid parameter'}), 400
 
-        # Apply mute/unmute action
         client.calls(call_sid).update(
             method='POST',
             url=f'https://twilio-web-dialer.onrender.com/handle_calls?Mute={str(mute)}'
@@ -125,7 +125,6 @@ def mute_call():
         return jsonify({'error': str(e)}), 500
 
 def check_for_auto_transfer():
-    """Background task to check for unanswered calls and transfer them."""
     while True:
         current_time = time.time()
         calls_to_transfer = []
@@ -140,7 +139,7 @@ def check_for_auto_transfer():
                 if call.status in ['ringing', 'in-progress']:
                     client.calls(call_sid).update(
                         method='POST',
-                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'  # Auto-transfer to backup agent
+                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'
                     )
                     logger.info(f'Auto-transferred call {call_sid} to backup agent')
 
@@ -151,9 +150,9 @@ def check_for_auto_transfer():
 
         time.sleep(1)
 
-# Start background thread for auto-transfer
 transfer_thread = threading.Thread(target=check_for_auto_transfer, daemon=True)
 transfer_thread.start()
 
+port = int(os.environ.get("PORT", 3000))  # Use Render's assigned port
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
