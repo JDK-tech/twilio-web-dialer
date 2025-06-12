@@ -43,29 +43,6 @@ AGENTS = {
 # Track active calls for auto-transfer
 active_calls = {}
 
-@app.route('/')
-def home():
-    return render_template('home.html', title="In browser calls")
-
-@app.route('/token', methods=['GET'])
-def get_token():
-    identity = request.args.get('client', 'user')
-
-    if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
-        return jsonify({'error': 'Missing required environment variables'}), 500
-
-    try:
-        access_token = AccessToken(account_sid, api_key, api_key_secret, identity=identity)
-        voice_grant = VoiceGrant(outgoing_application_sid=twiml_app_sid, incoming_allow=True)
-        access_token.add_grant(voice_grant)
-
-        logger.info(f'Generated token for identity: {identity}')
-        return jsonify({'token': access_token.to_jwt(), 'identity': identity})
-
-    except Exception as e:
-        logger.error(f'Token generation failed: {str(e)}')
-        return jsonify({'error': f'Failed to generate token: {str(e)}'}), 500
-
 @app.route('/handle_calls', methods=['POST'])
 def handle_calls():
     try:
@@ -76,17 +53,19 @@ def handle_calls():
             return jsonify({'error': 'Twilio number not configured'}), 500
 
         call_sid = request.form.get('CallSid')
+        from_number = request.form.get('From')
         to_number = request.form.get('To')
 
-        # **Ensuring outbound calls correctly route to real agents**
+        # **Outbound vs. Inbound Call Handling**
         if to_number and to_number != twilio_number:
+            # Outbound call
             dial = Dial(callerId=twilio_number)
             dial.number(to_number)
         else:
-            # Assign the first available agent for inbound calls
+            # Inbound call: assign first available agent
             agent_numbers = list(AGENTS.values())
             dial = Dial(callerId=twilio_number)
-            dial.number(agent_numbers[0])  # Start with the first agent
+            dial.number(agent_numbers[0])  # First agent answers
 
             if call_sid:
                 active_calls[call_sid] = time.time()
@@ -110,7 +89,8 @@ def transfer_call():
         if not call_sid or not target_number:
             return jsonify({'error': 'Missing required parameters'}), 400
 
-        call = client.calls(call_sid).update(
+        # Transfer call to provided agent
+        client.calls(call_sid).update(
             method='POST',
             url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={target_number}'
         )
@@ -131,6 +111,7 @@ def mute_call():
         if not call_sid:
             return jsonify({'error': 'Missing CallSid parameter'}), 400
 
+        # Apply mute/unmute action
         client.calls(call_sid).update(
             method='POST',
             url=f'https://twilio-web-dialer.onrender.com/handle_calls?Mute={str(mute)}'
@@ -159,7 +140,7 @@ def check_for_auto_transfer():
                 if call.status in ['ringing', 'in-progress']:
                     client.calls(call_sid).update(
                         method='POST',
-                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'  # Transfers to backup agent
+                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'  # Auto-transfer to backup agent
                     )
                     logger.info(f'Auto-transferred call {call_sid} to backup agent')
 
@@ -170,7 +151,7 @@ def check_for_auto_transfer():
 
         time.sleep(1)
 
-# Start auto-transfer monitoring in background
+# Start background thread for auto-transfer
 transfer_thread = threading.Thread(target=check_for_auto_transfer, daemon=True)
 transfer_thread.start()
 
