@@ -78,22 +78,25 @@ def handle_calls():
             return jsonify({'error': 'Twilio number not configured'}), 500
 
         call_sid = request.form.get('CallSid')
+        from_number = request.form.get('From')
         to_number = request.form.get('To')
 
-        # Ensure outbound calls route correctly
-        if to_number and to_number != twilio_number:
-            dial = Dial(callerId=twilio_number)
-            dial.number(to_number)
-            response.append(dial)
-        else:
-            # Assign available agent for inbound calls
+        # **Inbound Call Handling**
+        if to_number == twilio_number:
+            logger.info(f'Inbound call from {from_number}')
             agent_numbers = list(AGENTS.values())
             dial = Dial(callerId=twilio_number)
-            dial.number(agent_numbers[0])  # First agent answers
+            dial.number(agent_numbers[0])  # Route call to first available agent
             response.append(dial)
 
             if call_sid:
                 active_calls[call_sid] = time.time()
+
+        # **Outbound Call Handling**
+        else:
+            dial = Dial(callerId=twilio_number)
+            dial.number(to_number)
+            response.append(dial)
 
         logger.info('Call routing completed')
         return str(response)
