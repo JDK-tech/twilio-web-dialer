@@ -5,6 +5,18 @@ $(function () {
     let currentAgentIndex = 0;
     let currentConnection = null;  // Track active call for mute/unmute
 
+    // -- Agent list (update display names and numbers to match your backend/AGENTS dictionary) --
+    const AGENTS = {
+        "Hailey": "+18108191394",
+        "Brandi": "+13137658399",
+        "Nicholle": "+15177778712",
+        "Rue": "+18105444469",
+        "Avary": "+17346009019",
+        "Breezy": "+17343664154",
+        "Graysen": "+15863023066",
+        "Stephanie": "+15177451309"
+    };
+
     async function initAudio() {
         try {
             if (!audioContext) {
@@ -39,10 +51,12 @@ $(function () {
             log("Got a token.");
             console.log("Token: " + response.token);
 
-            /** 
-             * SDK 2.x+ : Simply construct the device.
-             * Audio will be handled automatically.
-             */
+            if (device) {
+                // If device already exists (token refresh), update token
+                device.updateToken(response.token);
+                return;
+            }
+
             device = new Twilio.Device(response.token, {
                 codecPreferences: ["opus", "pcmu"],
                 fakeLocalDTMF: true,
@@ -54,11 +68,27 @@ $(function () {
             device.on("error", handleError);
             device.on("connect", handleConnect);
             device.on("incoming", handleIncoming);
-
             device.on("disconnect", function () {
                 currentAgentIndex = 0;
                 log("Call disconnected. Resetting agent index.");
                 currentConnection = null;  // Clear connection after call ends
+            });
+            device.on("tokenWillExpire", function () {
+                log("Token will expire soon. Fetching a new one...");
+                fetchTwilioToken();
+            });
+            device.on("tokenExpired", function () {
+                log("Token expired! Fetching a new one...");
+                fetchTwilioToken();
+            });
+            device.on("registering", function () {
+                log("Twilio Device is registering...");
+            });
+            device.on("registered", function () {
+                log("Twilio Device is registered.");
+            });
+            device.on("unregistered", function () {
+                log("Twilio Device is unregistered.");
             });
 
         } catch (error) {
@@ -71,7 +101,6 @@ $(function () {
     function handleDeviceReady() {
         log("Twilio.Device Ready!");
 
-        // Optionally log available input devices
         navigator.mediaDevices.addEventListener('devicechange', async () => {
             const devices = await navigator.mediaDevices.enumerateDevices();
             const audioInputs = devices.filter(device => device.kind === 'audioinput');
@@ -88,6 +117,11 @@ $(function () {
                 console.log("Audio context resumed");
             }
         });
+
+        // Log device status for debugging
+        if (device) {
+            log("Device status: " + device.status());
+        }
     }
 
     function handleError(error) {
@@ -97,6 +131,9 @@ $(function () {
         if (error.message.includes("WSTransport socket error")) {
             log("WebSocket error detected. Retrying in 5 seconds...");
             setTimeout(fetchTwilioToken, 5000);
+        } else if (error.message.includes("Authorization token expired") || error.message.includes("JWT Token Expired")) {
+            log("Authorization token expired, fetching new one...");
+            fetchTwilioToken();
         }
     }
 
@@ -138,24 +175,92 @@ $(function () {
     function handleIncoming(conn) {
         log("Incoming connection from " + conn.parameters.From);
         $("#callerNumber").text(conn.parameters.From);
+
+        // Setup Transfer modal UI to initial state
+        $('#transferOptions').hide();
+        $('#transferAgent').empty();
+        $('.btnAcceptCall').show();
+        $('.btnReject').show();
+        $('.btnTransfer').show();
+        $('.btnCancelTransfer').hide();
+
         $('#modal-incomming-call').modal('show');
 
-        $('.btnReject').off().on('click', function () {
-            $('.modal').modal('hide');
-            log("Rejected call...");
-            conn.reject();
-        });
-
+        // Accept logic
         $('.btnAcceptCall').off().on('click', function () {
-            $('.modal').modal('hide');
+            $('#modal-incomming-call').modal('hide');
             log("Accepted call...");
             conn.accept();
             currentConnection = conn;  // Store active connection
         });
+
+        // Reject logic
+        $('.btnReject').off().on('click', function () {
+            $('#modal-incomming-call').modal('hide');
+            log("Rejected call...");
+            conn.reject();
+        });
+
+        // Transfer logic
+        $('.btnTransfer').off().on('click', function () {
+            // Populate agent dropdown
+            $('#transferAgent').empty();
+            for (const [agent, number] of Object.entries(AGENTS)) {
+                $('#transferAgent').append($('<option>', {
+                    value: number,
+                    text: agent + " (" + number + ")"
+                }));
+            }
+            $('#transferOptions').show();
+            $('.btnAcceptCall, .btnReject, .btnTransfer').hide();
+            $('.btnCancelTransfer').show();
+        });
+
+        // Cancel transfer
+        $('.btnCancelTransfer').off().on('click', function () {
+            $('#transferOptions').hide();
+            $('.btnAcceptCall, .btnReject, .btnTransfer').show();
+            $('.btnCancelTransfer').hide();
+        });
+
+        // Confirm Transfer: double-click dropdown or add a confirm button if you prefer
+        $('#transferAgent').off('dblclick').on('dblclick', function () {
+            transferToAgent();
+        });
+
+        // If you prefer a confirm button, uncomment and implement in your HTML:
+        // $('.btnTransferConfirm').off().on('click', transferToAgent);
+
+        function transferToAgent() {
+            const targetNumber = $('#transferAgent').val();
+            if (!targetNumber) { log("Please select an agent."); return; }
+            log("Transferring call to " + targetNumber + " ...");
+
+            $('#modal-incomming-call').modal('hide');
+
+            // POST to your Flask backend
+            $.ajax({
+                url: '/transfer_call',
+                type: 'POST',
+                data: {
+                    CallSid: conn.parameters.CallSid,
+                    TargetAgent: targetNumber
+                },
+                success: function (response) {
+                    log("Transfer successful: " + (response.message || ""));
+                },
+                error: function (xhr) {
+                    log("Transfer error: " + (xhr.responseJSON ? xhr.responseJSON.error : xhr.statusText));
+                }
+            });
+
+            // Optionally reject the connection in browser
+            conn.reject();
+        }
     }
 
     $('#btnDial').on('click', function () {
-        const phoneNumber = $("#phoneNumber").val();  // Get the entered number
+        const phoneNumber = $("#phoneNumber").val();
         if (!phoneNumber) {
             log("No phone number entered.");
             return;
@@ -176,7 +281,7 @@ $(function () {
     async function init() {
         try {
             await initAudio();
-            await requestMedia();       // Preemptively get audio permission (optional in 2.x+)
+            await requestMedia();       // Preemptively get audio permission
             await fetchTwilioToken();   // Now set up device and handlers
         } catch (error) {
             console.error("Initialization failed:", error);

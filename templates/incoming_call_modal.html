@@ -1,28 +1,44 @@
-<div class="modal" id="modal-incomming-call" style="width: 300px; height: 600px;margin-left: 560px;">
-    <div class="modal-dialog modal-dialog-centered ">
+<div class="modal" id="modal-incomming-call" style="width: 300px; height: 600px; margin-left: 560px;">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
 
             <!-- Modal Header -->
             <div class="modal-header mx-auto">
-                <h4 id="callerNumber"></h4>
+                <h4 class="modal-title">Incoming Call</h4>
             </div>
 
-            <!-- Modal body -->
+            <!-- Modal Body -->
             <div class="modal-body" id="modal-incomming-call-body" style="height: 300px;">
+                <p>From: <span id="callerNumber"></span></p>
+                
+                <!-- Transfer Options (hidden unless Transfer is chosen) -->
+                <div id="transferOptions" style="display: none;">
+                    <label for="transferAgent" class="mt-2">Transfer to Agent:</label>
+                    <select id="transferAgent" class="form-control mt-2">
+                        <!-- Populated dynamically with agent names -->
+                    </select>
+                    <div class="mt-3">
+                        <button class="btn btn-success btnTransferConfirm" type="button">
+                            <i class="fa fa-share" aria-hidden="true"></i> Confirm Transfer
+                        </button>
+                        <button class="btn btn-secondary btnCancelTransfer ml-2" type="button">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
             </div>
-
 
             <!-- Modal Footer -->
             <div class="modal-footer mx-auto">
-                <button class="btnAcceptCall btn btn-default btn-circle" type="button">
-                    <i class="fa fa-phone fa-flip-horizontal  fa-1x " aria-hidden="true" style="color: green;"></i>
+                <button class="btnAcceptCall btn btn-default btn-circle" type="button" title="Accept Call">
+                    <i class="fa fa-phone fa-flip-horizontal fa-1x" aria-hidden="true" style="color: green;"></i>
                 </button>
-                <button type="button" class="btn btn-default btn-circle btnReject">
+                <button class="btn btn-default btn-circle btnReject" type="button" title="Decline">
                     <i class="fa fa-phone fa-1x fa-rotate-icon" aria-hidden="true" style="color: red;"></i>
                 </button>
-            </div>
-
-            <div>
+                <button class="btn btn-primary btn-circle btnTransfer" type="button" title="Transfer Call">
+                    <i class="fa fa-share fa-1x" aria-hidden="true"></i>
+                </button>
             </div>
         </div>
     </div>

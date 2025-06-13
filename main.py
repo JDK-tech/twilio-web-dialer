@@ -23,15 +23,13 @@ api_key_secret = os.getenv('TWILIO_API_KEY_SECRET')
 twiml_app_sid = os.getenv('TWIML_APP_SID')
 twilio_number = os.getenv('TWILIO_NUMBER')
 
-# The name of the 'client identity'—this must match what your JavaScript dialer uses
-CLIENT_IDENTITY = 'web_agent'  # Change this if your frontend uses a different identity for Twilio.Device
+CLIENT_IDENTITY = 'web_agent'  # Should match your frontend Twilio.Device identity
 
 # Initialize Twilio client
 client = Client(api_key, api_key_secret, account_sid)
 
 app = Flask(__name__)
 
-# Original AGENTS dictionary preserved, but not used for inbound now
 AGENTS = {
     'Hailey': os.getenv('AGENT1_NUMBER', '+18108191394'),
     'Brandi': os.getenv('AGENT2_NUMBER', '+13137658399'),
@@ -51,7 +49,6 @@ def home():
 
 @app.route('/token', methods=['GET'])
 def get_token():
-    # Use a static identity, matching CLIENT_IDENTITY, for the web dialer
     identity = CLIENT_IDENTITY
 
     if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
@@ -111,7 +108,7 @@ def voice():
     try:
         response = VoiceResponse()
         dial = Dial()
-        dial.client(CLIENT_IDENTITY)  # Must match your JavaScript/client identity
+        dial.client(CLIENT_IDENTITY)
         response.append(dial)
         logger.info(f'Inbound call routed to client: {CLIENT_IDENTITY}')
         return Response(str(response), mimetype='application/xml')
@@ -125,14 +122,20 @@ def voice():
 def transfer_call():
     try:
         call_sid = request.form.get('CallSid')
-        target_number = request.form.get('TargetAgent')
+        target_agent = request.form.get('TargetAgent')
 
-        if not call_sid or not target_number:
+        if not call_sid or not target_agent:
             return jsonify({'error': 'Missing required parameters'}), 400
+
+        # Accept agent name or phone number
+        target_number = AGENTS.get(target_agent, target_agent)
+
+        # Generate absolute URL for transfer_twiml so Twilio can reach it in production!
+        transfer_twiml_url = request.url_root.rstrip('/') + '/transfer_twiml?To=' + target_number
 
         client.calls(call_sid).update(
             method='POST',
-            url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={target_number}'
+            url=transfer_twiml_url
         )
 
         logger.info(f'Transferred call {call_sid} to {target_number}')
@@ -141,6 +144,18 @@ def transfer_call():
     except Exception as e:
         logger.error(f'Call transfer failed: {str(e)}')
         return jsonify({'error': str(e)}), 500
+
+@app.route('/transfer_twiml', methods=['POST', 'GET'])
+def transfer_twiml():
+    to_number = request.args.get('To') or request.form.get('To')
+    response = VoiceResponse()
+    if to_number:
+        dial = Dial()
+        dial.number(to_number)
+        response.append(dial)
+    else:
+        response.say("No number specified for transfer.")
+    return Response(str(response), mimetype='application/xml')
 
 @app.route('/mute_call', methods=['POST'])
 def mute_call():
@@ -153,7 +168,7 @@ def mute_call():
 
         client.calls(call_sid).update(
             method='POST',
-            url=f'https://twilio-web-dialer.onrender.com/handle_calls?Mute={str(mute)}'
+            url=f'{request.url_root.rstrip("/")}/transfer_twiml?Mute={str(mute)}'
         )
 
         logger.info(f'{"Muted" if mute else "Unmuted"} call {call_sid}')
@@ -176,11 +191,14 @@ def check_for_auto_transfer():
             try:
                 call = client.calls(call_sid).fetch()
                 if call.status in ['ringing', 'in-progress']:
-                    client.calls(call_sid).update(
-                        method='POST',
-                        url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'
-                    )
-                    logger.info(f'Auto-transferred call {call_sid} to backup agent')
+                    backup_agent_number = AGENTS.get('Stephanie')
+                    if backup_agent_number:
+                        transfer_twiml_url = app.config.get("BASE_URL", "http://localhost:3000") + '/transfer_twiml?To=' + backup_agent_number
+                        client.calls(call_sid).update(
+                            method='POST',
+                            url=transfer_twiml_url
+                        )
+                        logger.info(f'Auto-transferred call {call_sid} to backup agent')
                 del active_calls[call_sid]
             except Exception as e:
                 logger.error(f'Auto-transfer failed for call {call_sid}: {str(e)}')
