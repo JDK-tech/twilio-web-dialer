@@ -33,34 +33,16 @@ $(function () {
         }
     }
 
-    function handleDeviceReady() {
-        log("Twilio.Device Ready!");
-        Twilio.Device.setup(stream);
-
-        navigator.mediaDevices.addEventListener('devicechange', async () => {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputs = devices.filter(device => device.kind === 'audioinput');
-            console.log("Available audio inputs:", audioInputs);
-        });
-
-        Twilio.Device.audio.setOutputDevice("default")
-            .then(() => console.log("Default audio output set"))
-            .catch(error => console.error("Failed to set audio output:", error));
-
-        document.addEventListener("click", async () => {
-            if (audioContext.state === "suspended") {
-                await audioContext.resume();
-                console.log("Audio context resumed");
-            }
-        });
-    }
-
     async function fetchTwilioToken() {
         try {
             const response = await $.getJSON("./token");
             log("Got a token.");
             console.log("Token: " + response.token);
 
+            /** 
+             * SDK 2.x+ : Simply construct the device.
+             * Audio will be handled automatically.
+             */
             device = new Twilio.Device(response.token, {
                 codecPreferences: ["opus", "pcmu"],
                 fakeLocalDTMF: true,
@@ -84,6 +66,28 @@ $(function () {
             log("Could not get a token from server! Retrying...");
             setTimeout(fetchTwilioToken, 5000);
         }
+    }
+
+    function handleDeviceReady() {
+        log("Twilio.Device Ready!");
+
+        // Optionally log available input devices
+        navigator.mediaDevices.addEventListener('devicechange', async () => {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(device => device.kind === 'audioinput');
+            console.log("Available audio inputs:", audioInputs);
+        });
+
+        Twilio.Device.audio.setOutputDevice("default")
+            .then(() => console.log("Default audio output set"))
+            .catch(error => console.error("Failed to set audio output:", error));
+
+        document.addEventListener("click", async () => {
+            if (audioContext && audioContext.state === "suspended") {
+                await audioContext.resume();
+                console.log("Audio context resumed");
+            }
+        });
     }
 
     function handleError(error) {
@@ -172,8 +176,8 @@ $(function () {
     async function init() {
         try {
             await initAudio();
-            await requestMedia();
-            await fetchTwilioToken();
+            await requestMedia();       // Preemptively get audio permission (optional in 2.x+)
+            await fetchTwilioToken();   // Now set up device and handlers
         } catch (error) {
             console.error("Initialization failed:", error);
             log("Initialization failed. Please refresh the page.");
