@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
 from twilio.twiml.voice_response import VoiceResponse, Dial
@@ -23,24 +23,26 @@ api_key_secret = os.getenv('TWILIO_API_KEY_SECRET')
 twiml_app_sid = os.getenv('TWIML_APP_SID')
 twilio_number = os.getenv('TWILIO_NUMBER')
 
+# The name of the 'client identity'—this must match what your JavaScript dialer uses
+CLIENT_IDENTITY = 'web_agent'  # Change this if your frontend uses a different identity for Twilio.Device
+
 # Initialize Twilio client
 client = Client(api_key, api_key_secret, account_sid)
 
 app = Flask(__name__)
 
-# **Preserving your original AGENTS dictionary**
+# Original AGENTS dictionary preserved, but not used for inbound now
 AGENTS = {
-    'Hailey': os.getenv('AGENT1_NUMBER', '+18108191394'),
-    'Brandi': os.getenv('AGENT2_NUMBER', '+13137658399'),
-    'Nicholle': os.getenv('AGENT3_NUMBER', '+15177778712'),
-    'Rue': os.getenv('AGENT4_NUMBER', '+18105444469'),
-    'Avary': os.getenv('AGENT5_NUMBER', '+17346009019'),
-    'Breezy': os.getenv('AGENT6_NUMBER', '+17343664154'),
-    'Graysen': os.getenv('AGENT7_NUMBER', '+15863023066'),
-    'Stephanie': os.getenv('AGENT8_NUMBER', '+15177451309')  # Backup agent
+    'Hailey': os.getenv('AGENT1_NUMBER', 'AGENT1 NUMBER'),
+    'Brandi': os.getenv('AGENT2_NUMBER', 'AGENT2 NUMBER'),
+    'Nicholle': os.getenv('AGENT3_NUMBER', 'AGENT3 NUMBER'),
+    'Rue': os.getenv('AGENT4_NUMBER', 'AGENT4 NUMBER'),
+    'Avary': os.getenv('AGENT5_NUMBER', 'AGENT5 NUMBER'),
+    'Breezy': os.getenv('AGENT6_NUMBER', 'AGENT6 NUMBER'),
+    'Graysen': os.getenv('AGENT7_NUMBER', 'AGENT7 NUMBER'),
+    'Stephanie': os.getenv('AGENT8_NUMBER', 'AGENT8 NUMBER')
 }
 
-# Track active calls for auto-transfer
 active_calls = {}
 
 @app.route('/')
@@ -49,7 +51,8 @@ def home():
 
 @app.route('/token', methods=['GET'])
 def get_token():
-    identity = request.args.get('client', 'user')
+    # Use a static identity, matching CLIENT_IDENTITY, for the web dialer
+    identity = CLIENT_IDENTITY
 
     if not all([account_sid, api_key, api_key_secret, twiml_app_sid]):
         logger.error("Missing required environment variables")
@@ -81,18 +84,11 @@ def handle_calls():
         from_number = request.form.get('From')
         to_number = request.form.get('To')
 
-        # **Inbound Call Handling**
+        # Inbound Call Handling (PSTN to Web Dialer now handled by /voice)
         if to_number == twilio_number:
             logger.info(f'Inbound call from {from_number}')
-            agent_numbers = list(AGENTS.values())
-            dial = Dial(callerId=twilio_number)
-            dial.number(agent_numbers[0])  # Route call to first available agent
-            response.append(dial)
-
-            if call_sid:
-                active_calls[call_sid] = time.time()
-
-        # **Outbound Call Handling**
+            response.say("Inbound calls are handled via the web dialer.")
+        # Outbound Call Handling
         else:
             dial = Dial(callerId=twilio_number)
             dial.number(to_number)
@@ -106,6 +102,24 @@ def handle_calls():
         response = VoiceResponse()
         response.say('An error occurred while connecting your call.')
         return str(response)
+
+@app.route('/voice', methods=['POST'])
+def voice():
+    """
+    Handle inbound PSTN calls and send them to the web dialer client.
+    """
+    try:
+        response = VoiceResponse()
+        dial = Dial()
+        dial.client(CLIENT_IDENTITY)  # Must match your JavaScript/client identity
+        response.append(dial)
+        logger.info(f'Inbound call routed to client: {CLIENT_IDENTITY}')
+        return Response(str(response), mimetype='application/xml')
+    except Exception as e:
+        logger.error(f'Error in inbound /voice route: {str(e)}')
+        response = VoiceResponse()
+        response.say("There was an error connecting your call. Please try again later.")
+        return Response(str(response), mimetype='application/xml')
 
 @app.route('/transfer_call', methods=['POST'])
 def transfer_call():
@@ -167,17 +181,14 @@ def check_for_auto_transfer():
                         url=f'https://twilio-web-dialer.onrender.com/handle_calls?To={AGENTS["Stephanie"]}'
                     )
                     logger.info(f'Auto-transferred call {call_sid} to backup agent')
-
                 del active_calls[call_sid]
-
             except Exception as e:
                 logger.error(f'Auto-transfer failed for call {call_sid}: {str(e)}')
-
         time.sleep(1)
 
 transfer_thread = threading.Thread(target=check_for_auto_transfer, daemon=True)
 transfer_thread.start()
 
-port = int(os.environ.get("PORT", 3000))  # Use Render's assigned port
+port = int(os.environ.get("PORT", 3000))
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=True)
