@@ -33,14 +33,14 @@ app = Flask(__name__)
 
 # Original AGENTS dictionary preserved, but not used for inbound now
 AGENTS = {
-    'Hailey': os.getenv('AGENT1_NUMBER', 'AGENT1 NUMBER'),
-    'Brandi': os.getenv('AGENT2_NUMBER', 'AGENT2 NUMBER'),
-    'Nicholle': os.getenv('AGENT3_NUMBER', 'AGENT3 NUMBER'),
-    'Rue': os.getenv('AGENT4_NUMBER', 'AGENT4 NUMBER'),
-    'Avary': os.getenv('AGENT5_NUMBER', 'AGENT5 NUMBER'),
-    'Breezy': os.getenv('AGENT6_NUMBER', 'AGENT6 NUMBER'),
-    'Graysen': os.getenv('AGENT7_NUMBER', 'AGENT7 NUMBER'),
-    'Stephanie': os.getenv('AGENT8_NUMBER', 'AGENT8 NUMBER')
+    'Hailey': os.getenv('AGENT1_NUMBER', '+18108191394'),
+    'Brandi': os.getenv('AGENT2_NUMBER', '+13137658399'),
+    'Nicholle': os.getenv('AGENT3_NUMBER', '+15177778712'),
+    'Rue': os.getenv('AGENT4_NUMBER', '+18105444469'),
+    'Avary': os.getenv('AGENT5_NUMBER', '+17346009019'),
+    'Breezy': os.getenv('AGENT6_NUMBER', '+17343664154'),
+    'Graysen': os.getenv('AGENT7_NUMBER', '+15863023066'),
+    'Stephanie': os.getenv('AGENT8_NUMBER', '+15177451309')  # Backup agent
 }
 
 active_calls = {}
